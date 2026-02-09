@@ -151,11 +151,34 @@ with st.sidebar:
 
 st.subheader("Input Features")
 
-age = st.number_input("Age (Years)", min_value=0.0, max_value=30.0, value=3.0, step=0.5)
-breed = st.selectbox("Breed", options=meta["breed_options"])
-gender = st.selectbox("Gender", options=meta["gender_options"])
+#เก็บผลไว้
+if "last_pred" not in st.session_state:
+    st.session_state.last_pred = None
+if "last_input" not in st.session_state:
+    st.session_state.last_input = None
 
-if st.button("Predict Weight (kg)", type="primary"):
+with st.form("predict_form"):
+    age = st.number_input(
+        "Age (Years)",
+        min_value=0.0,
+        max_value=30.0,
+        value=3.0,
+        step=0.5
+    )
+
+    breed = st.selectbox(
+        "Breed",
+        options=meta["breed_options"]
+    )
+
+    gender = st.selectbox(
+        "Gender",
+        options=meta["gender_options"]
+    )
+
+    submit = st.form_submit_button("Predict Weight (kg)")
+
+if submit:
     input_df = pd.DataFrame([{
         "Age": float(age),
         "Breed": str(breed),
@@ -163,7 +186,18 @@ if st.button("Predict Weight (kg)", type="primary"):
     }])
 
     pred = float(pipe.predict(input_df)[0])
-    st.success(f"✅ Predicted Weight: **{pred:.2f} kg**")
+
+    st.session_state.last_pred = pred
+    st.session_state.last_input = input_df
+
+# แสดงผลลัพธ์
+if st.session_state.last_pred is not None:
+    st.success(
+        f"✅ Predicted Weight: **{st.session_state.last_pred:.2f} kg**"
+    )
 
     with st.expander("Show input data"):
-        st.dataframe(input_df, use_container_width=True)
+        st.dataframe(
+            st.session_state.last_input,
+            use_container_width=True
+        )
