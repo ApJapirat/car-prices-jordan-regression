@@ -12,6 +12,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.preprocessing import PolynomialFeatures
 
 st.set_page_config(page_title="Cat Weight Predictor", page_icon="🐾")
 
@@ -65,6 +66,7 @@ def train_and_save():
 
     pipe = Pipeline(steps=[
         ("preprocess", preprocess),
+        ("poly", PolynomialFeatures(degree=2, include_bias=False)),
         ("model", LinearRegression())
     ])
 
