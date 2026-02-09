@@ -11,6 +11,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.preprocessing import PolynomialFeatures
 
 # Config
 DATA_PATH = os.getenv("DATA_PATH", "data/cats_dataset.csv")
@@ -69,9 +70,10 @@ def train(df: pd.DataFrame):
 
     pipe = Pipeline(steps=[
         ("preprocess", preprocess),
-        ("model", LinearRegression()),
+        ("poly", PolynomialFeatures(degree=2, include_bias=False)),
+        ("model", LinearRegression())
     ])
-
+    
     pipe.fit(X_train, y_train)
 
     y_pred = pipe.predict(X_test)
