@@ -91,12 +91,19 @@ def train_and_save():
 
 @st.cache_resource
 def load_or_train():
-    """Load saved model. If incompatible/missing -> retrain in this environment."""
+    """Load saved model. If missing/incompatible/features mismatch -> retrain."""
+    expected_features = ["Age", "Breed", "Gender"]  # ✅ ต้องตรงกับที่ train_and_save ใช้
+
     try:
         pipe = joblib.load(MODEL_PATH)
         with open(META_PATH, "r", encoding="utf-8") as f:
             meta = json.load(f)
+
+        if meta.get("features") != expected_features:
+            raise ValueError("Feature mismatch -> retrain")
+
         return pipe, meta
+
     except Exception:
         pipe, meta = train_and_save()
         return pipe, meta
