@@ -12,84 +12,104 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
-# Load dataset
+# Config
 DATA_PATH = os.getenv("DATA_PATH", "data/cats_dataset.csv")
-df = pd.read_csv(DATA_PATH)
+MODEL_PATH = os.getenv("MODEL_PATH", "models/cat_weight_model.joblib")
+META_PATH = os.getenv("META_PATH", "models/metadata.json")
 
-# ทำชื่อคอลัมน์ให้อ่านง่าย และเผื่อไม่ตรงกับไฟล์
-df = df.rename(columns={
-    "Age (Years)": "Age",
-    "Weight (kg)": "Weight",
-})
+FEATURES = ["Age", "Breed", "Color", "Gender"]
+TARGET = "Weight"
 
-# ลบช่องว่าง และจัดรูปแบบข้อความในคอลัมน์หมวดหมู่
-for c in ["Breed", "Color", "Gender"]:
-    if c in df.columns:
-        df[c] = df[c].astype(str).str.strip()
 
-# เลือก features และ target
-features = ["Age", "Breed", "Color", "Gender"]
-target = "Weight"
+def load_dataset(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
 
-# ตัดแถวที่ค่าว่างในคอลัมน์สำคัญ
-df = df.dropna(subset=features + [target]).copy()
+    # rename columns เผื่อชื่อในไฟล์เป็นแบบนี้
+    df = df.rename(columns={
+        "Age (Years)": "Age",
+        "Weight (kg)": "Weight",
+    })
 
-X = df[features]
-y = df[target].astype(float)
+    # clean categorical
+    for c in ["Breed", "Color", "Gender"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
 
-# Split train/test
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+    return df
 
-#Preprocess and Model (Linear Regression)
-num_cols = ["Age"]
-cat_cols = ["Breed", "Color", "Gender"]
 
-preprocess = ColumnTransformer(
-    transformers=[
-        ("num", StandardScaler(), num_cols),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
-    ],
-    remainder="drop",
-)
+def train(df: pd.DataFrame):
+    # กันกรณีคอลัมน์หาย
+    missing = [c for c in (FEATURES + [TARGET]) if c not in df.columns]
+    if missing:
+        raise ValueError(f"Dataset missing columns: {missing}")
 
-pipe = Pipeline(steps=[
-    ("preprocess", preprocess),
-    ("model", LinearRegression()),
-])
+    df = df.dropna(subset=FEATURES + [TARGET]).copy()
 
-# Train
-pipe.fit(X_train, y_train)
+    X = df[FEATURES]
+    y = df[TARGET].astype(float)
 
-# Evaluate
-y_pred = pipe.predict(X_test)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-r2 = r2_score(y_test, y_pred)
-mae = mean_absolute_error(y_test, y_pred)
-rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+    num_cols = ["Age"]
+    cat_cols = ["Breed", "Color", "Gender"]
 
-print("=== Evaluation on Test Set ===")
-print(f"R^2  : {r2:.4f}")
-print(f"MAE  : {mae:.4f}")
-print(f"RMSE : {rmse:.4f}")
+    preprocess = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), num_cols),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
+        ],
+        remainder="drop",
+    )
 
-# Save model and metadata
-os.makedirs("models", exist_ok=True)
-joblib.dump(pipe, "models/cat_weight_model.joblib")
+    pipe = Pipeline(steps=[
+        ("preprocess", preprocess),
+        ("model", LinearRegression()),
+    ])
 
-metadata = {
-    "features": features,
-    "target": target,
-    "breed_options": sorted(df["Breed"].unique().tolist()),
-    "color_options": sorted(df["Color"].unique().tolist()),
-    "gender_options": sorted(df["Gender"].unique().tolist()),
-    "metrics": {"r2": float(r2), "mae": float(mae), "rmse": float(rmse)},
-}
+    pipe.fit(X_train, y_train)
 
-with open("models/metadata.json", "w", encoding="utf-8") as f:
-    json.dump(metadata, f, ensure_ascii=False, indent=2)
+    y_pred = pipe.predict(X_test)
+    r2 = float(r2_score(y_test, y_pred))
+    mae = float(mean_absolute_error(y_test, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
-print("\nSaved:")
-print("- models/cat_weight_model.joblib")
-print("- models/metadata.json")
+    metrics = {"r2": r2, "mae": mae, "rmse": rmse}
+
+    meta = {
+        "features": FEATURES,
+        "target": TARGET,
+        "breed_options": sorted(df["Breed"].unique().tolist()),
+        "color_options": sorted(df["Color"].unique().tolist()),
+        "gender_options": sorted(df["Gender"].unique().tolist()),
+        "metrics": metrics,
+    }
+
+    return pipe, meta
+
+
+def save(pipe, meta, model_path: str, meta_path: str):
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    joblib.dump(pipe, model_path)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
+if __name__ == "__main__":
+    df = load_dataset(DATA_PATH)
+    pipe, meta = train(df)
+
+    print("=== Evaluation on Test Set ===")
+    print(f"R^2  : {meta['metrics']['r2']:.4f}")
+    print(f"MAE  : {meta['metrics']['mae']:.4f}")
+    print(f"RMSE : {meta['metrics']['rmse']:.4f}")
+
+    save(pipe, meta, MODEL_PATH, META_PATH)
+
+    print("\nSaved:")
+    print(f"- {MODEL_PATH}")
+    print(f"- {META_PATH}")
