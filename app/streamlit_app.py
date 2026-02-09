@@ -46,7 +46,10 @@ def train_and_save():
     y = df[EXPECTED_TARGET].astype(float)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y,
+        test_size=0.2,
+        random_state=42,
+        stratify=X["Breed"]  #สัดส่วน Breed ใน train/test ใกล้กัน
     )
 
     num_cols = ["Age"]
