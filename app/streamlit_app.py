@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-# ให้ import src ได้บน Streamlit Cloud
 import sys
 sys.path.append(os.path.abspath("."))
 
@@ -21,10 +20,6 @@ META_PATH = "models/metadata.json"
 
 
 def train_and_save_in_cloud():
-    """
-    ถ้า Streamlit Cloud โหลดโมเดลไม่ได้ (เช่น joblib mismatch) ให้เทรนใหม่ใน runtime นี้
-    โดยเรียก train.py logic แบบย่อ ๆ ตรงนี้
-    """
     from sklearn.model_selection import train_test_split
     from sklearn.compose import ColumnTransformer
     from sklearn.pipeline import Pipeline
@@ -72,6 +67,7 @@ def train_and_save_in_cloud():
     os.makedirs("models", exist_ok=True)
     joblib.dump(pipe, MODEL_PATH)
 
+    # dependent dropdown mappings
     brands = sorted(df["Brand"].dropna().unique().tolist())
 
     brand_to_models = {}
@@ -80,7 +76,10 @@ def train_and_save_in_cloud():
         models = sorted(df.loc[df["Brand"] == b, "Model"].dropna().unique().tolist())
         brand_to_models[b] = models
         for m in models:
-            props = sorted(df.loc[(df["Brand"] == b) & (df["Model"] == m), "Property"].dropna().unique().tolist())
+            props = sorted(
+                df.loc[(df["Brand"] == b) & (df["Model"] == m), "Property"]
+                .dropna().unique().tolist()
+            )
             brand_model_to_props[f"{b}|||{m}"] = props
 
     meta = {
@@ -121,7 +120,6 @@ with st.sidebar:
     st.subheader("Model Info")
     st.write("Target:", meta["target"])
     st.write("Features:", ", ".join(meta["features"]))
-
     st.write("Test Metrics (hold-out test set):")
     st.metric("R²", f"{meta['metrics']['r2']:.3f}")
     st.metric("MAE", f"{meta['metrics']['mae']:.0f}")
@@ -133,16 +131,17 @@ with st.sidebar:
         st.success("Retrained! (ลองกด Rerun / Refresh หน้าเว็บอีกที)")
 
 
-st.subheader("Input Features")
-
-# โหลด raw data เพื่อโชว์ sanity check (optional)
+# โหลด data สำหรับทำ “ตัวเลือกตามจริง”
 df_raw = pd.read_csv(DATA_PATH)
-df_feat = build_features(df_raw)
+df_feat = build_features(df_raw).dropna(subset=["Brand", "Model", "Property", "Year", "PowerCC", "Turbo", "Price"]).copy()
+
+st.subheader("Input Features")
 
 brands = meta["options"]["brands"]
 brand_to_models = meta["options"]["brand_to_models"]
 brand_model_to_props = meta["options"]["brand_model_to_props"]
 
+# --- Step 1: Brand -> Model -> Property ---
 brand = st.selectbox("Brand", options=brands)
 
 models_for_brand = brand_to_models.get(brand, [])
@@ -151,18 +150,50 @@ model = st.selectbox("Model", options=models_for_brand if models_for_brand else 
 props_for_model = brand_model_to_props.get(f"{brand}|||{model}", [])
 prop = st.selectbox("Property (transmission)", options=props_for_model if props_for_model else ["(no property)"])
 
-year = st.number_input("Year", min_value=1990, max_value=2026, value=2020, step=1)
-power_cc = st.number_input("Power (CC)", min_value=0.0, max_value=8000.0, value=1500.0, step=50.0)
-turbo = st.selectbox("Turbo", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
+# --- Step 2: derive valid Year/PowerCC/Turbo from real rows ---
+subset = df_feat[
+    (df_feat["Brand"] == brand) &
+    (df_feat["Model"] == model) &
+    (df_feat["Property"] == prop)
+].copy()
 
+has_rows = len(subset) > 0
+
+# Year options
+if has_rows:
+    year_options = sorted(subset["Year"].astype(int).unique().tolist())
+    default_year = int(year_options[-1])  # ใช้ปีล่าสุดเป็น default
+    year = st.selectbox("Year", options=year_options, index=year_options.index(default_year))
+else:
+    year = st.number_input("Year", min_value=1990, max_value=2026, value=2020, step=1)
+
+# PowerCC options
+if has_rows:
+    # บางแถว PowerCC อาจเป็น float แต่จริงๆคือ CC integer
+    power_options = sorted(subset["PowerCC"].round(0).astype(int).unique().tolist())
+    default_power = int(np.median(power_options)) if power_options else 1500
+    power_cc = st.selectbox("Power (CC)", options=power_options, index=power_options.index(default_power) if default_power in power_options else 0)
+else:
+    power_cc = st.number_input("Power (CC)", min_value=0.0, max_value=8000.0, value=1500.0, step=50.0)
+
+# Turbo options
+if has_rows:
+    turbo_options = sorted(subset["Turbo"].astype(int).unique().tolist())  # [0] or [1] or [0,1]
+    default_turbo = 1 if 1 in turbo_options else 0
+    turbo = st.selectbox("Turbo", options=turbo_options, format_func=lambda x: "Yes" if x == 1 else "No",
+                         index=turbo_options.index(default_turbo))
+else:
+    turbo = st.selectbox("Turbo", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
+
+# --- Predict ---
 if st.button("Predict Price", type="primary"):
     input_df = pd.DataFrame([{
         "Brand": brand,
         "Model": model,
         "Property": prop,
-        "Year": year,
-        "PowerCC": power_cc,
-        "Turbo": turbo,
+        "Year": int(year),
+        "PowerCC": float(power_cc),
+        "Turbo": int(turbo),
     }])
 
     pred = float(pipe.predict(input_df)[0])
@@ -171,12 +202,16 @@ if st.button("Predict Price", type="primary"):
     with st.expander("Show input data"):
         st.dataframe(input_df)
 
-    # sanity check: แถวจริงที่ match brand+model+property (โชว์ให้ดูว่าเลือกถูกคัน)
     with st.expander("Show selected raw rows (for sanity check)"):
         show = df_feat[
             (df_feat["Brand"] == brand) &
             (df_feat["Model"] == model) &
             (df_feat["Property"] == prop)
-        ][["Model", "Brand", "Property", "Power", "Price"]].head(10)
-
+        ][["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"]].head(10)
         st.dataframe(show if len(show) else pd.DataFrame({"note": ["No exact row match (still ok for prediction)"]}))
+
+# UI hint
+if has_rows:
+    st.caption(f"🔗 Linked inputs: found {len(subset)} rows for this Brand+Model+Property, so Year/CC/Turbo are constrained to valid values.")
+else:
+    st.caption("⚠️ No exact row match for Brand+Model+Property, so Year/CC/Turbo are free inputs (fallback).")
