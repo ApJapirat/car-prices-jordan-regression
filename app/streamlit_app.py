@@ -186,38 +186,32 @@ with col_right:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ===== Tabs =====
+# ===== Tabs (NO matplotlib / NO seaborn) =====
 tab1, tab2, tab3 = st.tabs(["📄 Dataset Preview", "📊 Insights", "ℹ️ About Model"])
 
 with tab1:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("Selected rows (sanity check):")
-    if len(subset):
-        st.dataframe(subset[["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"]].head(20),
-                     use_container_width=True)
-        st.caption(f"Rows matched: {len(subset)}")
+    st.subheader("📄 Dataset Preview")
+    st.caption("Selected rows (sanity check) — แถวที่ match กับ Brand + Model + Property ที่เลือก")
+
+    if subset is not None and len(subset) > 0:
+        cols_show = [c for c in ["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"] if c in subset.columns]
+        st.dataframe(subset[cols_show].head(30), use_container_width=True)
+        st.caption(f"Rows matched: {len(subset):,}")
     else:
-        st.info("No exact row match for this selection (still ok — model can generalize).")
+        st.info("No exact row match for this selection (ยังปกติ — โมเดลสามารถทำนายจาก pattern รวมได้)")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tab2:
-    import matplotlib.pyplot as plt
-
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("📊 Insights")
-    st.caption("Quick insights (filtered by Brand when possible) • กดปุ่ม Back ได้ถ้าหลงหน้า/กราฟ")
+    st.caption("Quick insights (filtered by Brand if possible) — โหมดนี้ไม่ใช้ matplotlib เลย")
 
-    # กันหลง/รีเฟรชง่าย
-    c_back, c_note = st.columns([0.18, 0.82])
-    with c_back:
-        if st.button("↩️ Back (rerun)"):
-            st.rerun()
-    with c_note:
-        st.write("")
-
-    # ---------- Filter ----------
+    # Filter by selected brand if possible
     brand_val = None
     try:
-        brand_val = input_df.loc[0, "Brand"]
+        brand_val = str(input_df.loc[0, "Brand"])
     except Exception:
         brand_val = None
 
@@ -225,99 +219,94 @@ with tab2:
         df_plot = df_feat[df_feat["Brand"] == brand_val].copy()
         if len(df_plot) < 30:
             df_plot = df_feat.copy()
-            st.info(f"Brand '{brand_val}' มีข้อมูลน้อย (<30) เลยแสดงภาพรวมทั้ง dataset แทน")
+            st.info(f"Brand '{brand_val}' มีแถวน้อย (<30) เลยโชว์ภาพรวมทั้ง dataset แทน")
         else:
             st.success(f"Showing insights for Brand = **{brand_val}** (rows: {len(df_plot):,})")
     else:
         df_plot = df_feat.copy()
         st.info("Showing insights for all brands")
 
-    # ---------- Basic Stats ----------
-    price_s = pd.to_numeric(df_plot["Price"], errors="coerce").dropna()
-
+    # Basic stats
+    price_s = pd.to_numeric(df_plot.get("Price", pd.Series([], dtype=float)), errors="coerce").dropna()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Rows", f"{len(df_plot):,}")
-    c2.metric("Min Price", f"{price_s.min():,.0f} JOD" if len(price_s) else "-")
+    c2.metric("Min", f"{price_s.min():,.0f} JOD" if len(price_s) else "-")
     c3.metric("Median", f"{price_s.median():,.0f} JOD" if len(price_s) else "-")
-    c4.metric("Max Price", f"{price_s.max():,.0f} JOD" if len(price_s) else "-")
+    c4.metric("Max", f"{price_s.max():,.0f} JOD" if len(price_s) else "-")
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    # ---------- Price Distribution (Histogram) ----------
-    st.write("### Price distribution")
-    bins = st.slider("Bins", min_value=10, max_value=60, value=30, step=5)
+    # Price distribution (simple bins table + bar chart from counts)
+    st.write("### Price distribution (bins)")
     if len(price_s) > 0:
-        fig, ax = plt.subplots()
-        ax.hist(price_s, bins=bins)
-        ax.set_xlabel("Price (JOD)")
-        ax.set_ylabel("Count")
-        ax.set_title("Price Distribution")
-        st.pyplot(fig, use_container_width=True)
+        bins = st.slider("Bins", 10, 60, 30, 5, key="bins_no_mpl")
+        binned = pd.cut(price_s, bins=bins)
+        counts = binned.value_counts().sort_index()
+        chart_df = pd.DataFrame({"count": counts.values}, index=counts.index.astype(str))
+
+        st.bar_chart(chart_df, height=260)
+        with st.expander("Show bin counts (table)"):
+            st.dataframe(chart_df, use_container_width=True)
     else:
-        st.warning("ไม่มีข้อมูล Price ที่ใช้ทำกราฟได้")
+        st.warning("ไม่มีข้อมูล Price ที่ใช้ทำ distribution ได้")
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    # ---------- Top Brands (Count) ----------
+    # Top brands by count (global, not filtered)
     st.write("### Top brands (count)")
-    topn = st.slider("Top N", min_value=5, max_value=25, value=10, step=5)
     if "Brand" in df_feat.columns:
+        topn = st.slider("Top N brands", 5, 25, 10, 5, key="topn_brand")
         vc = df_feat["Brand"].value_counts().head(topn)
-        fig, ax = plt.subplots()
-        ax.bar(vc.index.astype(str), vc.values)
-        ax.set_xlabel("Brand")
-        ax.set_ylabel("Count")
-        ax.set_title("Top Brands by Count")
-        ax.tick_params(axis="x", rotation=45)
-        st.pyplot(fig, use_container_width=True)
+        st.bar_chart(vc)
+        with st.expander("Show top brands (table)"):
+            st.dataframe(vc.rename("count").reset_index().rename(columns={"index": "Brand"}), use_container_width=True)
     else:
         st.info("ไม่พบคอลัมน์ Brand")
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-    # ---------- Year vs Price (Scatter) ----------
+    # Year vs Price (use Streamlit scatter_chart)
     st.write("### Year vs Price (sample)")
-    if "Year" in df_plot.columns and len(df_plot) > 0:
+    if "Year" in df_plot.columns and "Price" in df_plot.columns:
         tmp = df_plot[["Year", "Price"]].dropna().copy()
         if len(tmp) > 0:
-            # sample กันช้า
             tmp = tmp.sample(min(800, len(tmp)), random_state=42)
-
-            fig, ax = plt.subplots()
-            ax.scatter(tmp["Year"], tmp["Price"], s=12)
-            ax.set_xlabel("Year")
-            ax.set_ylabel("Price (JOD)")
-            ax.set_title("Year vs Price")
-            st.pyplot(fig, use_container_width=True)
+            st.scatter_chart(tmp, x="Year", y="Price", height=320)
         else:
-            st.info("ไม่มีข้อมูล Year/Price พอจะ plot scatter")
+            st.info("ไม่มีข้อมูล Year/Price พอจะ plot ได้")
     else:
-        st.info("ไม่พบคอลัมน์ Year")
+        st.info("ไม่พบคอลัมน์ Year หรือ Price")
 
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-
-    # ---------- Debug / sanity table ----------
     with st.expander("Show sample rows (sanity check)"):
-        st.dataframe(df_plot[["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"]].head(20),
-                     use_container_width=True)
+        cols_show = [c for c in ["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"] if c in df_plot.columns]
+        st.dataframe(df_plot[cols_show].head(20), use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tab3:
     st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("ℹ️ About Model")
+
+    r2 = float(meta["metrics"]["r2"])
+    mae = float(meta["metrics"]["mae"])
+    rmse = float(meta["metrics"]["rmse"])
+
     st.markdown(
-        """
+        f"""
         **Pipeline**
         - Feature engineering: Brand/Year from `Model`, PowerCC/Turbo from `Power`
         - Preprocess: StandardScaler (numeric) + OneHotEncoder (categorical)
-        - Model: Ridge Regression (linear regression family)
+        - Model: Ridge Regression (Linear Regression family)
 
-        **Metrics meaning**
-        - **R²**: ใกล้ 1 ดี (อธิบายความแปรปรวนของราคาได้มากขึ้น)
-        - **MAE/RMSE**: ใกล้ 0 ดี (error น้อยลง)
+        **Metrics**
+        - **R² = {r2:.3f}** → ใกล้ **1** ดี (โมเดลอธิบายความแปรปรวนของราคาได้มากขึ้น)
+        - **MAE = {mae:,.0f}** → ใกล้ **0** ดี (ค่า error เฉลี่ยน้อยลง)
+        - **RMSE = {rmse:,.0f}** → ใกล้ **0** ดี (ลงโทษ error ก้อนใหญ่แรงกว่า MAE)
 
         **Limitations**
-        - Dataset ไม่มี mileage / condition / accidents → ทำให้ราคาแกว่งได้
-        - Text parsing อาจพลาดบางรุ่นที่ format แปลก
-        """)
+        - Dataset ไม่มี mileage / condition / accidents → ทำให้ราคาแกว่ง
+        - การ parse ข้อความจาก `Model`/`Power` อาจพลาดบาง format ที่แปลก
+        """,
+        unsafe_allow_html=True
+    )
     st.markdown('</div>', unsafe_allow_html=True)
