@@ -200,21 +200,107 @@ with tab1:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tab2:
+    import matplotlib.pyplot as plt
+
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    # กราฟเบา ๆ ไม่ต้องพึ่ง seaborn
-    st.write("Quick insights (filtered by Brand if possible)")
-    # filter to selected brand if exists
-    brand_val = input_df.loc[0, "Brand"]
-    df_plot = df_feat[df_feat["Brand"] == brand_val].copy()
-    if len(df_plot) < 30:
+    st.subheader("📊 Insights")
+    st.caption("Quick insights (filtered by Brand when possible) • กดปุ่ม Back ได้ถ้าหลงหน้า/กราฟ")
+
+    # กันหลง/รีเฟรชง่าย
+    c_back, c_note = st.columns([0.18, 0.82])
+    with c_back:
+        if st.button("↩️ Back (rerun)"):
+            st.rerun()
+    with c_note:
+        st.write("")
+
+    # ---------- Filter ----------
+    brand_val = None
+    try:
+        brand_val = input_df.loc[0, "Brand"]
+    except Exception:
+        brand_val = None
+
+    if brand_val and "Brand" in df_feat.columns:
+        df_plot = df_feat[df_feat["Brand"] == brand_val].copy()
+        if len(df_plot) < 30:
+            df_plot = df_feat.copy()
+            st.info(f"Brand '{brand_val}' มีข้อมูลน้อย (<30) เลยแสดงภาพรวมทั้ง dataset แทน")
+        else:
+            st.success(f"Showing insights for Brand = **{brand_val}** (rows: {len(df_plot):,})")
+    else:
         df_plot = df_feat.copy()
+        st.info("Showing insights for all brands")
 
-    st.write("Price distribution")
-    st.bar_chart(df_plot["Price"].value_counts(bins=30).sort_index())
+    # ---------- Basic Stats ----------
+    price_s = pd.to_numeric(df_plot["Price"], errors="coerce").dropna()
 
-    st.write("Year vs Price (sample)")
-    sample = df_plot[["Year", "Price"]].dropna().sample(min(800, len(df_plot)), random_state=42)
-    st.scatter_chart(sample, x="Year", y="Price")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Rows", f"{len(df_plot):,}")
+    c2.metric("Min Price", f"{price_s.min():,.0f} JOD" if len(price_s) else "-")
+    c3.metric("Median", f"{price_s.median():,.0f} JOD" if len(price_s) else "-")
+    c4.metric("Max Price", f"{price_s.max():,.0f} JOD" if len(price_s) else "-")
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+    # ---------- Price Distribution (Histogram) ----------
+    st.write("### Price distribution")
+    bins = st.slider("Bins", min_value=10, max_value=60, value=30, step=5)
+    if len(price_s) > 0:
+        fig, ax = plt.subplots()
+        ax.hist(price_s, bins=bins)
+        ax.set_xlabel("Price (JOD)")
+        ax.set_ylabel("Count")
+        ax.set_title("Price Distribution")
+        st.pyplot(fig, use_container_width=True)
+    else:
+        st.warning("ไม่มีข้อมูล Price ที่ใช้ทำกราฟได้")
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+    # ---------- Top Brands (Count) ----------
+    st.write("### Top brands (count)")
+    topn = st.slider("Top N", min_value=5, max_value=25, value=10, step=5)
+    if "Brand" in df_feat.columns:
+        vc = df_feat["Brand"].value_counts().head(topn)
+        fig, ax = plt.subplots()
+        ax.bar(vc.index.astype(str), vc.values)
+        ax.set_xlabel("Brand")
+        ax.set_ylabel("Count")
+        ax.set_title("Top Brands by Count")
+        ax.tick_params(axis="x", rotation=45)
+        st.pyplot(fig, use_container_width=True)
+    else:
+        st.info("ไม่พบคอลัมน์ Brand")
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+    # ---------- Year vs Price (Scatter) ----------
+    st.write("### Year vs Price (sample)")
+    if "Year" in df_plot.columns and len(df_plot) > 0:
+        tmp = df_plot[["Year", "Price"]].dropna().copy()
+        if len(tmp) > 0:
+            # sample กันช้า
+            tmp = tmp.sample(min(800, len(tmp)), random_state=42)
+
+            fig, ax = plt.subplots()
+            ax.scatter(tmp["Year"], tmp["Price"], s=12)
+            ax.set_xlabel("Year")
+            ax.set_ylabel("Price (JOD)")
+            ax.set_title("Year vs Price")
+            st.pyplot(fig, use_container_width=True)
+        else:
+            st.info("ไม่มีข้อมูล Year/Price พอจะ plot scatter")
+    else:
+        st.info("ไม่พบคอลัมน์ Year")
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+    # ---------- Debug / sanity table ----------
+    with st.expander("Show sample rows (sanity check)"):
+        st.dataframe(df_plot[["Model", "Brand", "Property", "Power", "Year", "PowerCC", "Turbo", "Price"]].head(20),
+                     use_container_width=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tab3:
