@@ -10,51 +10,57 @@ from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from sklearn.preprocessing import PolynomialFeatures
-
-st.set_page_config(page_title="Cat Weight Predictor", page_icon="🐾")
-
-# Paths + expected schema--
-DATA_PATH = os.getenv("DATA_PATH", "data/cats_dataset.csv")
-MODEL_PATH = os.getenv("MODEL_PATH", "models/cat_weight_model.joblib")
-META_PATH = os.getenv("META_PATH", "models/metadata.json")
-
-EXPECTED_FEATURES = ["Age", "Breed", "Color", "Gender"]
-EXPECTED_TARGET = "Weight"
 
 
-def _load_df() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH)
-    df = df.rename(columns={"Age (Years)": "Age", "Weight (kg)": "Weight"})
-    for c in ["Breed", "Color", "Gender"]:
-        if c in df.columns:
-            df[c] = df[c].astype(str).str.strip()
-    return df
+st.set_page_config(page_title="Car Price Predictor", page_icon="🚗")
+
+DATA_PATH = "data/car_prices_jordan.csv"
+MODEL_PATH = "models/car_price_model.joblib"
+META_PATH = "models/metadata.json"
+
+
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create the same features as in training."""
+    import re
+
+    def extract_year(model: str):
+        m = re.search(r"(19|20)\d{2}", str(model))
+        return int(m.group()) if m else np.nan
+
+    def extract_cc(power: str):
+        m = re.search(r"(\d+)\s*CC", str(power).upper())
+        return float(m.group(1)) if m else np.nan
+
+    out = df.copy()
+    out["Price"] = out["Price"].astype(str).str.replace(",", "", regex=False).astype(float)
+
+    out["Brand"] = out["Model"].astype(str).str.strip().str.split().str[0]
+    out["Year"] = out["Model"].apply(extract_year)
+    out["Property"] = out["Property"].astype(str).str.strip().str.lower()
+    out["PowerCC"] = out["Power"].apply(extract_cc)
+    out["Turbo"] = out["Power"].astype(str).str.contains("TURBO", case=False, na=False).astype(int)
+    return out
 
 
 def train_and_save():
-    """Train Linear Regression in this runtime and save artifacts."""
-    df = _load_df()
+    df = pd.read_csv(DATA_PATH)
+    df = build_features(df)
 
-    missing = [c for c in (EXPECTED_FEATURES + [EXPECTED_TARGET]) if c not in df.columns]
-    if missing:
-        raise ValueError(f"Dataset missing columns: {missing}")
+    features = ["Brand", "Property", "Year", "PowerCC", "Turbo"]
+    target = "Price"
 
-    df = df.dropna(subset=EXPECTED_FEATURES + [EXPECTED_TARGET]).copy()
-    X = df[EXPECTED_FEATURES]
-    y = df[EXPECTED_TARGET].astype(float)
+    df = df.dropna(subset=features + [target]).copy()
+    X = df[features]
+    y = df[target].astype(float)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=0.2,
-        random_state=42,
-        stratify=X["Breed"]  #สัดส่วน Breed ใน train/test ใกล้กัน
+        X, y, test_size=0.2, random_state=42
     )
 
-    num_cols = ["Age"]
-    cat_cols = ["Breed", "Color", "Gender"]
+    num_cols = ["Year", "PowerCC", "Turbo"]
+    cat_cols = ["Brand", "Property"]
 
     preprocess = ColumnTransformer(
         transformers=[
@@ -64,32 +70,28 @@ def train_and_save():
         remainder="drop",
     )
 
-    pipe = Pipeline(steps=[
+    pipe = Pipeline([
         ("preprocess", preprocess),
-        ("poly", PolynomialFeatures(degree=2, include_bias=False)),
-        ("model", LinearRegression())
+        ("model", Ridge(alpha=1.0)),
     ])
 
     pipe.fit(X_train, y_train)
 
     y_pred = pipe.predict(X_test)
-    r2 = float(r2_score(y_test, y_pred))
-    mae = float(mean_absolute_error(y_test, y_pred))
+    r2 = r2_score(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
     os.makedirs("models", exist_ok=True)
     joblib.dump(pipe, MODEL_PATH)
 
     meta = {
-        "features": EXPECTED_FEATURES,
-        "target": EXPECTED_TARGET,
-        "breed_options": sorted(df["Breed"].unique().tolist()),
-        "color_options": sorted(df["Color"].unique().tolist()),
-        "gender_options": sorted(df["Gender"].unique().tolist()),
-        "metrics": {"r2": r2, "mae": mae, "rmse": rmse},
-        "trained_on": "streamlit_cloud_runtime",
+        "features": features,
+        "target": target,
+        "brand_options": sorted(df["Brand"].unique().tolist()),
+        "property_options": sorted(df["Property"].unique().tolist()),
+        "metrics": {"r2": float(r2), "mae": float(mae), "rmse": float(rmse)},
     }
-
     with open(META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
@@ -98,74 +100,55 @@ def train_and_save():
 
 @st.cache_resource
 def load_or_train():
-    """Load artifacts; if missing/incompatible/schema mismatch -> retrain."""
     try:
         pipe = joblib.load(MODEL_PATH)
         with open(META_PATH, "r", encoding="utf-8") as f:
             meta = json.load(f)
-
-        # ✅ schema mismatch (เช่นเคยแก้ features) -> retrain
-        if meta.get("features") != EXPECTED_FEATURES or meta.get("target") != EXPECTED_TARGET:
-            raise ValueError("Feature/target mismatch -> retrain")
-
         return pipe, meta
-
     except Exception:
         return train_and_save()
 
 
 # UI
-st.title("🐾 Cat Weight Predictor (Regression)")
-st.caption("Linear Regression + One-Hot Encoding (Supervised Learning)")
+st.title("🚗 Car Price Predictor (Jordan)")
+st.caption("Multiple Regression (Linear) using 5 features: Brand, Property, Year, PowerCC, Turbo")
 
 pipe, meta = load_or_train()
 
 with st.sidebar:
     st.subheader("Model Info")
-    st.write(f"Target: **{meta['target']}**")
-    st.write("Features: " + ", ".join(meta["features"]))
+    st.write("Target:", meta["target"])
+    st.write("Features:", ", ".join(meta["features"]))
 
-    m = meta.get("metrics", {})
-    st.markdown("**Test Metrics (hold-out test set):**")
-    st.write(f"- R²  : {m.get('r2', 0):.3f}")
-    st.write(f"- MAE : {m.get('mae', 0):.3f}")
-    st.write(f"- RMSE: {m.get('rmse', 0):.3f}")
+    st.write("Test Metrics (hold-out test set):")
+    st.metric("R²", f"{meta['metrics']['r2']:.3f}")
+    st.metric("MAE", f"{meta['metrics']['mae']:.0f}")
+    st.metric("RMSE", f"{meta['metrics']['rmse']:.0f}")
 
-    if st.button("🔁 Retrain model (cloud)", help="Use when you update data or want fresh metrics."):
+    if st.button("🔁 Retrain model (cloud)"):
         load_or_train.clear()
         pipe, meta = train_and_save()
-        st.success("Retrained successfully! Refresh/rerun if needed.")
-        st.stop()
-
-# keep prediction result after rerun
-if "last_pred" not in st.session_state:
-    st.session_state.last_pred = None
-if "last_input" not in st.session_state:
-    st.session_state.last_input = None
+        st.success("Retrained! (ลองกด Rerun / Refresh หน้าเว็บอีกที)")
 
 st.subheader("Input Features")
 
-with st.form("predict_form"):
-    age = st.number_input("Age (Years)", min_value=0.0, max_value=30.0, value=3.0, step=0.5)
-    breed = st.selectbox("Breed", options=meta["breed_options"])
-    color = st.selectbox("Color", options=meta["color_options"])
-    gender = st.selectbox("Gender", options=meta["gender_options"])
-    submit = st.form_submit_button("Predict Weight (kg)")
+brand = st.selectbox("Brand", options=meta["brand_options"])
+prop = st.selectbox("Property (transmission)", options=meta["property_options"])
+year = st.number_input("Year", min_value=1990, max_value=2026, value=2020, step=1)
+power_cc = st.number_input("Power (CC)", min_value=0.0, max_value=8000.0, value=1500.0, step=50.0)
+turbo = st.selectbox("Turbo", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
 
-if submit:
+if st.button("Predict Price", type="primary"):
     input_df = pd.DataFrame([{
-        "Age": float(age),
-        "Breed": str(breed),
-        "Color": str(color),
-        "Gender": str(gender),
+        "Brand": brand,
+        "Property": prop,
+        "Year": year,
+        "PowerCC": power_cc,
+        "Turbo": turbo,
     }])
 
     pred = float(pipe.predict(input_df)[0])
+    st.success(f"✅ Predicted Price: **{pred:,.0f} JOD**")
 
-    st.session_state.last_pred = pred
-    st.session_state.last_input = input_df
-
-if st.session_state.last_pred is not None:
-    st.success(f"✅ Predicted Weight: **{st.session_state.last_pred:.2f} kg**")
     with st.expander("Show input data"):
-        st.dataframe(st.session_state.last_input, use_container_width=True)
+        st.dataframe(input_df)
