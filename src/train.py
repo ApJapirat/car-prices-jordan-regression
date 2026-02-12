@@ -20,30 +20,44 @@ MODEL_PATH = os.getenv("MODEL_PATH", "models/car_price_model.joblib")
 META_PATH = os.getenv("META_PATH", "models/metadata.json")
 
 
-def main():
-    # Load
-    df_raw = pd.read_csv(DATA_PATH)
-
-    # Feature engineering
+def train_and_save(
+    data_path: str = DATA_PATH,
+    model_path: str = MODEL_PATH,
+    meta_path: str = META_PATH,
+    random_state: int = 42,
+):
+    # Load + feature engineering
+    df_raw = pd.read_csv(data_path)
     df = build_features(df_raw)
 
-    features = ["Brand", "Model", "Property", "Year", "PowerCC", "Turbo"]
+    use_year = True  
+
+    if use_year:
+        features = ["Brand", "Model", "Property", "Year", "PowerCC", "Turbo"]  # 6
+    else:
+        features = ["Brand", "Model", "Property", "PowerCC", "Turbo"]  # 5
+
     target = "Price"
 
-    # drop rows ที่ใช้ไม่ได้
-    df = df.dropna(subset=features + [target]).copy()
+    # Clean NA
+    needed_cols = features + [target]
+    df = df.dropna(subset=needed_cols).copy()
 
     X = df[features]
     y = df[target].astype(float)
 
     # Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=random_state
     )
 
     # Preprocess
-    num_cols = ["Year", "PowerCC", "Turbo"]
-    cat_cols = ["Brand", "Model", "Property"]
+    if use_year:
+        num_cols = ["Year", "PowerCC", "Turbo"]
+        cat_cols = ["Brand", "Model", "Property"]
+    else:
+        num_cols = ["PowerCC", "Turbo"]
+        cat_cols = ["Brand", "Model", "Property"]
 
     preprocess = ColumnTransformer(
         transformers=[
@@ -53,31 +67,28 @@ def main():
         remainder="drop",
     )
 
-    # Ridge = linear regression family (ยังเป็น linear model)
-    pipe = Pipeline(steps=[
-        ("preprocess", preprocess),
-        ("model", Ridge(alpha=1.0)),
-    ])
+    # Ridge = linear regression family
+    pipe = Pipeline(
+        steps=[
+            ("preprocess", preprocess),
+            ("model", Ridge(alpha=1.0)),
+        ]
+    )
 
     # Train
     pipe.fit(X_train, y_train)
 
     # Evaluate
     y_pred = pipe.predict(X_test)
-    r2 = r2_score(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
+    r2 = float(r2_score(y_test, y_pred))
+    mae = float(mean_absolute_error(y_test, y_pred))
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
-    print("=== Evaluation on Test Set ===")
-    print(f"R^2  : {r2:.4f}")
-    print(f"MAE  : {mae:.4f}")
-    print(f"RMSE : {rmse:.4f}")
+    # Save model
+    os.makedirs(os.path.dirname(model_path) or "models", exist_ok=True)
+    joblib.dump(pipe, model_path)
 
-    # Save
-    os.makedirs("models", exist_ok=True)
-    joblib.dump(pipe, MODEL_PATH)
-
-    # ทำ dropdown แบบ dependent: Brand -> Model -> Property
+    # Build dependent dropdown options
     brands = sorted(df["Brand"].dropna().unique().tolist())
 
     brand_to_models = {}
@@ -87,23 +98,39 @@ def main():
         models = sorted(df.loc[df["Brand"] == b, "Model"].dropna().unique().tolist())
         brand_to_models[b] = models
         for m in models:
-            props = sorted(df.loc[(df["Brand"] == b) & (df["Model"] == m), "Property"].dropna().unique().tolist())
+            props = sorted(
+                df.loc[(df["Brand"] == b) & (df["Model"] == m), "Property"]
+                .dropna()
+                .unique()
+                .tolist()
+            )
             brand_model_to_props[f"{b}|||{m}"] = props
 
-    metadata = {
+    meta = {
         "features": features,
         "target": target,
-        "metrics": {"r2": float(r2), "mae": float(mae), "rmse": float(rmse)},
+        "use_year": bool(use_year),
+        "metrics": {"r2": r2, "mae": mae, "rmse": rmse},
         "options": {
             "brands": brands,
             "brand_to_models": brand_to_models,
             "brand_model_to_props": brand_model_to_props,
-        }
+        },
     }
 
-    with open(META_PATH, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    os.makedirs(os.path.dirname(meta_path) or "models", exist_ok=True)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
 
+    return pipe, meta
+
+
+def main():
+    pipe, meta = train_and_save()
+    print("=== Evaluation on Test Set ===")
+    print(f"R^2  : {meta['metrics']['r2']:.4f}")
+    print(f"MAE  : {meta['metrics']['mae']:.4f}")
+    print(f"RMSE : {meta['metrics']['rmse']:.4f}")
     print("\nSaved:")
     print(f"- {MODEL_PATH}")
     print(f"- {META_PATH}")
