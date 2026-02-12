@@ -19,7 +19,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
 
-    # --- Clean Price ---
+    # Clean Price
     if "Price" in out.columns:
         out["Price"] = (
             out["Price"]
@@ -28,7 +28,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         )
         out["Price"] = pd.to_numeric(out["Price"], errors="coerce")
 
-    # --- Model text ---
+    # Model text 
     if "Model" not in out.columns:
         out["Model"] = np.nan
 
@@ -44,12 +44,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     out["Year"] = out["Model"].apply(extract_year)
 
-    # --- Property ---
+    # Property 
     if "Property" not in out.columns:
         out["Property"] = np.nan
     out["Property"] = out["Property"].astype(str).str.strip().str.lower()
 
-    # --- Power / CC / Turbo ---
+    #Power / CC / Turbo 
     if "Power" not in out.columns:
         out["Power"] = np.nan
     out["Power"] = out["Power"].astype(str).str.strip()
